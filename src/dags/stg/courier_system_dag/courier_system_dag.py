@@ -42,8 +42,9 @@ def sprint5_stg_courier_system_dag():
 
     @task(task_id="deliveries_load") 
     def load_deliveries(**kwargs):
+        execution_date = kwargs['execution_date']
         loader = DeliveryLoader(api_endpoint, headers, dwh_pg_connect, log)
-        loader.load_deliveries()
+        loader.load_deliveries(execution_date)
 
     # Инициализируем объявленные таски.
     couriers_dict = load_couriers()

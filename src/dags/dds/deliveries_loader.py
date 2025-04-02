@@ -95,24 +95,45 @@ class DeliveryLoader:
             if not wf_setting:
                 wf_setting = EtlSetting(id=0, workflow_key=self.WF_KEY, workflow_settings={self.LAST_LOADED_ID_KEY: -1})
 
-            # Вычитываем очередную пачку объектов.
             last_loaded = wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY]
-            load_queue = self.origin.list_deliverys(last_loaded)
-            self.log.info(f"Found {len(load_queue)} deliverys to load.")
-            if not load_queue:
-                self.log.info("Quitting.")
-                return
-
-            # Сохраняем объекты в базу dwh.
-            for raw_delivery in load_queue:
-                delivery = DeliveryObj(delivery_id=raw_delivery.delivery_id, delivery_ts=raw_delivery.delivery_ts,
-                                       rate=raw_delivery.rate, tip_sum=raw_delivery.tip_sum)
-                self.dds.insert_delivery(conn, delivery)
-
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                        WITH inserted_deliveries AS (
+                            INSERT INTO dds.dm_deliveries (
+                                delivery_id,
+                                delivery_ts,
+                                rate,
+                                tip_sum
+                            )
+                            SELECT 
+                                d.delivery_id,
+                                d.delivery_ts,
+                                d.rate,
+                                d.tip_sum
+                            FROM stg.couriersystem_deliveries d
+                            WHERE d.delivery_ts > %(last_loaded_ts)s
+                            ORDER BY d.delivery_ts
+                            LIMIT %(batch_limit)s
+                            ON CONFLICT (delivery_id) DO UPDATE SET
+                                delivery_ts = EXCLUDED.delivery_ts,
+                                rate = EXCLUDED.rate,
+                                tip_sum = EXCLUDED.tip_sum
+                            RETURNING delivery_ts
+                        )
+                        SELECT MAX(delivery_ts) FROM inserted_deliveries
+                    """,
+                    {
+                        "last_loaded": last_loaded,
+                        "batch_limit": self.BATCH_LIMIT
+                    }
+                )
+                result = cur.fetchone()
+                max_ts = result[0] if result[0] else last_loaded
             # Сохраняем прогресс.
             # Мы пользуемся тем же connection, поэтому настройка сохранится вместе с объектами,
             # либо откатятся все изменения целиком.
-            wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY] = max([t.delivery_ts for t in load_queue])
+            wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY] = max_ts
             wf_setting_json = json2str(wf_setting.workflow_settings)  # Преобразуем к строке, чтобы положить в БД.
             self.settings_repository.save_setting(conn, wf_setting.workflow_key, wf_setting_json)
 

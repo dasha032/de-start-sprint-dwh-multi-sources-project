@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 
 
 @dag(
-    schedule_interval='0/15 * * * *',  # Задаем расписание выполнения дага - каждый 15 минут.
+    schedule_interval='0 0 10 * *',  # Задаем расписание выполнения дага - каждый 15 минут.
     start_date=pendulum.datetime(2025, 3, 25, tz="UTC"),  # Дата начала выполнения дага. Можно поставить сегодня.
     catchup=False,  # Нужно ли запускать даг за предыдущие периоды (с start_date до сегодня) - False (не нужно).
     tags=['sprint5', 'dds', 'origin', 'example'],  # Теги, используются для фильтрации в интерфейсе Airflow.

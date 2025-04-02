@@ -88,23 +88,41 @@ class CourierLoader:
             if not wf_setting:
                 wf_setting = EtlSetting(id=0, workflow_key=self.WF_KEY, workflow_settings={self.LAST_LOADED_ID_KEY: -1})
 
-            # Вычитываем очередную пачку объектов.
             last_loaded = wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY]
-            load_queue = self.origin.list_couriers(last_loaded)
-            self.log.info(f"Found {len(load_queue)} couriers to load.")
-            if not load_queue:
-                self.log.info("Quitting.")
-                return
-
-            # Сохраняем объекты в базу dwh.
-            for raw_courier in load_queue:
-                courier = CourierObj(courier_id=raw_courier.id, courier_name=raw_courier.name)
-                self.dds.insert_courier(conn, courier)
+            
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                        WITH inserted_couriers AS (
+                            INSERT INTO dds.dm_couriers (
+                                courier_id,
+                                courier_name
+                            )
+                            SELECT 
+                                c.id,
+                                c.name
+                            FROM stg.couriersystem_couriers c
+                            WHERE c.id > %(last_loaded)s
+                            ORDER BY c.id
+                            LIMIT %(batch_limit)s
+                            ON CONFLICT (courier_id) DO UPDATE SET
+                                courier_name = EXCLUDED.courier_name
+                            RETURNING courier_id
+                        )
+                        SELECT MAX(courier_id) FROM inserted_couriers
+                    """,
+                    {
+                        "last_loaded": last_loaded,
+                        "batch_limit": self.BATCH_LIMIT
+                    }
+                )
+                result = cur.fetchone()
+                max_id = result[0] if result[0] else last_loaded
 
             # Сохраняем прогресс.
             # Мы пользуемся тем же connection, поэтому настройка сохранится вместе с объектами,
             # либо откатятся все изменения целиком.
-            wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY] = max([t.id for t in load_queue])
+            wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY] = max_id
             wf_setting_json = json2str(wf_setting.workflow_settings)  # Преобразуем к строке, чтобы положить в БД.
             self.settings_repository.save_setting(conn, wf_setting.workflow_key, wf_setting_json)
 
