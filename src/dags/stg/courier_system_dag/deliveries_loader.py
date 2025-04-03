@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from logging import Logger
-from typing import List
+from typing import List, Optional
 import requests
 
 from stg import EtlSetting, StgEtlSettingsRepository
@@ -10,6 +10,7 @@ from psycopg import Connection
 from psycopg.rows import class_row
 from pydantic import BaseModel
 
+
 class DeliveryObj(BaseModel):
     order_id: str
     delivery_id: str
@@ -18,32 +19,32 @@ class DeliveryObj(BaseModel):
     rate: int
     tip_sum: float
 
+
 class DeliveriesApiRepository:
     def __init__(self, api_endpoint: str, headers: dict) -> None:
         self.api_endpoint = api_endpoint
         self.headers = headers
 
     def list_deliveries(
-    self,
-    last_loaded_ts: Optional[str] = None,
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
-    limit: int = 100,
-    offset: int = 0
-) -> List[DeliveryObj]
+        self,
+        last_loaded_ts: Optional[str] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[DeliveryObj]:
         url = f'https://{self.api_endpoint}/deliveries'
         params = {
-        'limit': limit,
-        'offset': offset,
-        'sort_field': 'date',
-        'sort_direction': 'asc'
-    }
+            'limit': limit,
+            'offset': offset,
+            'sort_field': 'date',
+            'sort_direction': 'asc'
+        }
         
         if last_loaded_ts:
             dt = datetime.strptime(last_loaded_ts, '%Y-%m-%d %H:%M:%S.%f')
             params['from'] = dt.strftime('%Y-%m-%d %H:%M:%S')
         
-
         if from_date:
             params['from'] = from_date.strftime('%Y-%m-%d %H:%M:%S')
         if to_date:
@@ -55,6 +56,7 @@ class DeliveriesApiRepository:
         deliveries = response.json()
         
         return [DeliveryObj(**delivery) for delivery in deliveries]
+
 
 class DeliveryDestRepository:
     def insert_delivery(self, conn: Connection, delivery: DeliveryObj) -> None:
@@ -76,6 +78,7 @@ class DeliveryDestRepository:
                 """,
                 delivery.dict(),
             )
+
 
 class DeliveryLoader:
     WF_KEY = "deliveries_api_to_stg_workflow"
